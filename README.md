@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Network CTF Challenge Website
 
 A real-time competitive Capture The Flag (CTF) website designed for network analysis challenges using Wireshark. Multiple users can compete simultaneously to capture flags through **real network packet analysis** - just like picoCTF!
@@ -234,3 +235,7 @@ This project is open source and available for educational purposes.
 **Happy Hacking! 🚀**
 
 **Remember: You must capture REAL network traffic with Wireshark to find the flags!**
+=======
+# CTF
+Network CTF Challenge with Wireshark integration
+>>>>>>> 5869bb9fc5f29beacdcbfcdfe59cdac6b1d2ed97
