@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CTF Debug</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+      }
+      .debug {
+        background: #f0f0f0;
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 5px;
+      }
+      .error {
+        background: #ffebee;
+        color: #c62828;
+      }
+      .success {
+        background: #e8f5e8;
+        color: #2e7d32;
+      }
+    </style>
+    <!-- Firebase App (the core Firebase SDK) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  </head>
+  <body>
+    <h1>CTF Firebase Debug</h1>
+
+    <div class="debug" id="firebase-status">
+      <h3>Firebase Status</h3>
+      <div id="firebase-info">Checking...</div>
+    </div>
+
+    <div class="debug">
+      <h3>Test Join Competition</h3>
+      <input type="text" id="test-username" placeholder="Enter username" />
+      <button onclick="testJoin()">Test Join</button>
+      <div id="join-result"></div>
+    </div>
+
+    <div class="debug">
+      <h3>Console Logs</h3>
+      <div id="console-logs"></div>
+    </div>
+
+    <script>
+      // Firebase configuration
+      const firebaseConfig = {
+        apiKey: "AIzaSyCrlgwWQ5QFib3fhdSTBgOMHJqAJVl4fLM",
+        authDomain: "wireshark-f1fe7.firebaseapp.com",
+        databaseURL:
+          "https://wireshark-f1fe7-default-rtdb.asia-southeast1.firebasedatabase.app/",
+        projectId: "wireshark-f1fe7",
+        storageBucket: "wireshark-f1fe7.firebasestorage.app",
+        messagingSenderId: "651462050730",
+        appId: "1:651462050730:web:4b8e1efff8a9b5a48da1d3",
+      };
+
+      let db = null;
+
+      function log(message, type = "info") {
+        const logsDiv = document.getElementById("console-logs");
+        const logEntry = document.createElement("div");
+        logEntry.className = type;
+        logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        logsDiv.appendChild(logEntry);
+        console.log(message);
+      }
+
+      function updateFirebaseStatus(status, message) {
+        const statusDiv = document.getElementById("firebase-info");
+        statusDiv.innerHTML = `<strong>${status}:</strong> ${message}`;
+        statusDiv.className = status === "Connected" ? "success" : "error";
+      }
+
+      // Initialize Firebase
+      try {
+        log("Initializing Firebase...");
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.database();
+        log("Firebase initialized successfully");
+        updateFirebaseStatus("Connected", "Firebase is ready");
+      } catch (error) {
+        log(`Firebase initialization error: ${error.message}`, "error");
+        updateFirebaseStatus("Error", error.message);
+      }
+
+      function testJoin() {
+        const username = document.getElementById("test-username").value.trim();
+        const resultDiv = document.getElementById("join-result");
+
+        if (!username) {
+          resultDiv.innerHTML =
+            '<div class="error">Please enter a username</div>';
+          return;
+        }
+
+        if (!db) {
+          resultDiv.innerHTML =
+            '<div class="error">Firebase not initialized</div>';
+          return;
+        }
+
+        log(`Testing join competition for username: ${username}`);
+
+        // Test adding user to Firebase
+        db.ref(`users/${username}`)
+          .set({
+            username: username,
+            joinedAt: firebase.database.ServerValue.TIMESTAMP,
+            lastActivity: firebase.database.ServerValue.TIMESTAMP,
+          })
+          .then(() => {
+            log("User added to Firebase successfully");
+
+            // Test adding to leaderboard
+            return db.ref(`leaderboard/${username}`).set({
+              username: username,
+              score: 0,
+              flags: [],
+              lastActivity: firebase.database.ServerValue.TIMESTAMP,
+            });
+          })
+          .then(() => {
+            log("User added to leaderboard successfully");
+            resultDiv.innerHTML =
+              '<div class="success">Join test successful! User added to Firebase.</div>';
+          })
+          .catch((error) => {
+            log(`Firebase error: ${error.message}`, "error");
+            resultDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+          });
+      }
+
+      // Test Firebase connection
+      if (db) {
+        db.ref(".info/connected").on("value", (snapshot) => {
+          const connected = snapshot.val();
+          if (connected) {
+            log("Firebase connection established");
+            updateFirebaseStatus("Connected", "Real-time connection active");
+          } else {
+            log("Firebase connection lost", "error");
+            updateFirebaseStatus("Disconnected", "No real-time connection");
+          }
+        });
+      }
+    </script>
+  </body>
+</html>

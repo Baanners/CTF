@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Network CTF Challenge</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+      rel="stylesheet"
+    />
+    <!-- Firebase App (the core Firebase SDK) -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <h1><i class="fas fa-flag"></i> Network CTF Challenge</h1>
+        <div class="user-info">
+          <input
+            type="text"
+            id="username"
+            placeholder="Enter your username"
+            maxlength="20"
+          />
+          <button id="joinBtn" class="btn btn-primary">Join Competition</button>
+          <button
+            id="resetBtn"
+            class="btn btn-secondary"
+            style="background: #ff6b6b"
+          >
+            Reset All
+          </button>
+          <button
+            id="recalculateBtn"
+            class="btn btn-secondary"
+            style="background: #4ecdc4"
+          >
+            Recalculate Scores
+          </button>
+        </div>
+      </header>
+
+      <div class="main-content">
+        <div class="leaderboard-section">
+          <h2><i class="fas fa-trophy"></i> Live Leaderboard</h2>
+          <div id="leaderboard" class="leaderboard">
+            <!-- Leaderboard will be populated dynamically -->
+          </div>
+        </div>
+
+        <div class="challenges-section" style="display: none">
+          <h2><i class="fas fa-puzzle-piece"></i> Available Challenges</h2>
+          <div
+            id="welcome-message"
+            style="text-align: center; padding: 40px; color: #ffd700"
+          >
+            <h3>Welcome to the Network CTF Challenge!</h3>
+            <p>
+              Please enter your username and click "Join Competition" to start
+              capturing flags.
+            </p>
+            <p>
+              You'll need Wireshark to analyze network traffic and find hidden
+              flags.
+            </p>
+          </div>
+          <div id="challenges" class="challenges-grid">
+            <!-- Challenges will be populated dynamically -->
+          </div>
+        </div>
+
+        <div class="network-section">
+          <h2><i class="fas fa-network-wired"></i> Network Activity</h2>
+          <div class="network-info">
+            <div class="network-status">
+              <span id="networkStatus" class="status-indicator"
+                >Disconnected</span
+              >
+              <button id="startCapture" class="btn btn-secondary" disabled>
+                Start Wireshark Capture
+              </button>
+            </div>
+            <div id="packetInfo" class="packet-info">
+              <h3>Packet Analysis</h3>
+              <div id="packetData" class="packet-data">
+                <p>Start Wireshark to begin packet analysis...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Challenge Modal -->
+      <div id="challengeModal" class="modal">
+        <div class="modal-content">
+          <span class="close">&times;</span>
+          <div id="modalContent">
+            <!-- Challenge content will be loaded here -->
+          </div>
+        </div>
+      </div>
+
+      <!-- Notification System -->
+      <div id="notifications" class="notifications"></div>
+    </div>
+
+    <script src="script.js"></script>
+  </body>
+</html>
