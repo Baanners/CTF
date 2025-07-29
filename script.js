@@ -155,6 +155,7 @@ class CTFSystem {
         points: 100,
         trafficType: "http",
         requiredAction: "Capture HTTP GET request to /secret",
+        stealable: true,
       },
       {
         id: 2,
@@ -434,11 +435,6 @@ class CTFSystem {
       this.resetAllUsers();
     });
 
-    // Recalculate scores button
-    document.getElementById("recalculateBtn").addEventListener("click", () => {
-      this.recalculateAllScores();
-    });
-
     // Username input enter key
     document.getElementById("username").addEventListener("keypress", (e) => {
       if (e.key === "Enter") {
@@ -594,12 +590,24 @@ class CTFSystem {
             `;
 
       if (state.status === "occupied") {
+        const startTime = state.startTime;
+        const currentTime = Date.now();
+        const timeElapsed = currentTime - startTime;
+        const timeoutDuration = 5 * 60 * 1000;
+        const remainingTime = Math.max(0, timeoutDuration - timeElapsed);
+        const minutes = Math.floor(remainingTime / 60000);
+        const seconds = Math.floor((remainingTime % 60000) / 1000);
+
         card.innerHTML += `<div style="margin-top: 10px; font-size: 12px; color: #ff6b6b;">
-                    🔒 Occupied by: ${state.occupiedBy}
+                    🔒 Occupied by: ${
+                      state.occupiedBy
+                    } | Time: <span class="timer" data-start="${startTime}" data-challenge="${
+          challenge.id
+        }">${minutes}:${seconds.toString().padStart(2, "0")}</span>
                 </div>`;
       } else if (state.status === "completed") {
         const scoreEarned = state.score || challenge.points;
-        card.innerHTML += `<div style="margin-top: 10px; font-size: 12px; color: #4ecdc4;">
+        card.innerHTML += `<div style="margin-top: 10px; font-size:12px; color: #4ecdc4;">
                     ✅ Completed by: ${state.completedBy} | Score: +${scoreEarned}
                 </div>`;
       }
@@ -610,6 +618,9 @@ class CTFSystem {
 
       challengesContainer.appendChild(card);
     });
+
+    // Start timer updates
+    this.startTimerUpdates();
   }
 
   openChallenge(challenge) {
@@ -620,19 +631,47 @@ class CTFSystem {
       state.status === "occupied" &&
       state.occupiedBy !== this.currentUser
     ) {
-      this.showNotification(
-        `Challenge is currently occupied by ${state.occupiedBy}`,
-        "error"
-      );
-      return;
+      // Check if challenge has timed out (5 minutes)
+      const startTime = state.startTime;
+      const currentTime = Date.now();
+      const timeElapsed = currentTime - startTime;
+      const timeoutDuration = 5 * 60 * 1000; // 5 minutes in milliseconds
+
+      if (timeElapsed >= timeoutDuration) {
+        // Challenge has timed out, make it available again
+        const newState = {
+          status: "available",
+          occupiedBy: null,
+          startTime: null,
+        };
+        this.db.ref(`challenges/${challenge.id}`).set(newState);
+        this.showNotification(
+          `Challenge timed out! It's now available.`,
+          "info"
+        );
+      } else {
+        const remainingTime = Math.ceil((timeoutDuration - timeElapsed) / 1000);
+        this.showNotification(
+          `Challenge is occupied by ${
+            state.occupiedBy
+          }. Time remaining: ${Math.floor(remainingTime / 60)}:${(
+            remainingTime % 60
+          )
+            .toString()
+            .padStart(2, "0")}`,
+          "error"
+        );
+        return;
+      }
     }
 
+    // Allow stealing completed challenges
     if (state && state.status === "completed") {
       this.showNotification(
-        "This challenge has already been completed",
-        "error"
+        "This challenge is completed but can be stolen! Submit the correct flag to steal it.",
+        "info"
       );
-      return;
+      // Don't return - allow the challenge to be opened for stealing
     }
 
     // Occupy the challenge in Firebase
@@ -658,6 +697,18 @@ class CTFSystem {
                 <div style="background: rgba(255,215,0,0.1); padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #ffd700;">
                     <p><strong>${challenge.requiredAction}</strong></p>
                 </div>
+                
+                ${
+                  state && state.status === "completed"
+                    ? `
+                <div style="background: rgba(255,107,53,0.1); padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #ff6b35;">
+                    <h3>🎯 Steal This Challenge!</h3>
+                    <p><strong>This challenge is completed by ${state.completedBy}.</strong></p>
+                    <p>Submit the correct flag to steal it and earn the points!</p>
+                </div>
+                `
+                    : ""
+                }
                 
                 <h3>Wireshark Instructions</h3>
                 <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 8px; margin: 15px 0;">
@@ -729,12 +780,70 @@ class CTFSystem {
     }
 
     if (submittedFlag === challenge.flag) {
+      // Check if challenge is already completed and stealable
+      const currentState = this.challengeStates.get(challengeId);
+      let pointsToAward = challenge.points;
+      let stealMessage = "";
+
+      if (
+        currentState &&
+        currentState.status === "completed" &&
+        challenge.stealable
+      ) {
+        // Steal the challenge - award points to current user, remove from previous user
+        const previousUser = currentState.completedBy;
+        pointsToAward = challenge.points;
+        stealMessage = ` 🎯 STOLEN from ${previousUser}!`;
+
+        // Remove points from previous user
+        this.db
+          .ref(`leaderboard/${previousUser}`)
+          .once("value")
+          .then((snapshot) => {
+            const prevUserData = snapshot.val();
+            if (prevUserData) {
+              const newScore = Math.max(
+                0,
+                prevUserData.score - challenge.points
+              );
+              const newFlags = prevUserData.flags.filter(
+                (id) => id !== challengeId
+              );
+              this.db.ref(`leaderboard/${previousUser}`).update({
+                score: newScore,
+                flags: newFlags,
+                lastActivity: firebase.database.ServerValue.TIMESTAMP,
+              });
+            }
+          });
+
+        // Generate new flag for the challenge
+        const newFlag = this.generateNewFlag(challenge);
+        challenge.flag = newFlag;
+
+        // Update the challenge in the challenges array
+        const challengeIndex = this.challenges.findIndex(
+          (c) => c.id === challengeId
+        );
+        if (challengeIndex !== -1) {
+          this.challenges[challengeIndex].flag = newFlag;
+        }
+
+        // Note: Network traffic still contains the original flag
+        // Users must capture the current flag from network traffic to steal
+        console.log(`Flag changed for challenge ${challengeId}: ${newFlag}`);
+
+        // Notify the network generator to advance the flag
+        this.notifyNetworkGenerator(challengeId);
+      }
+
       // Update challenge state in Firebase
       const newState = {
         status: "completed",
         completedBy: this.currentUser,
         completedAt: firebase.database.ServerValue.TIMESTAMP,
-        score: challenge.points, // Add the score to the challenge data
+        score: pointsToAward,
+        flag: challenge.flag, // Store the current flag
       };
       this.db.ref(`challenges/${challengeId}`).set(newState);
 
@@ -767,6 +876,18 @@ class CTFSystem {
         })
         .then(() => {
           console.log("Firebase update completed successfully");
+
+          // Check for win condition (600 points)
+          if (userData.score + pointsToAward >= 600) {
+            this.showNotification(
+              `🏆 ${this.currentUser} WINS THE CTF! Total score: ${
+                userData.score + pointsToAward
+              } points!`,
+              "success"
+            );
+            // End the competition
+            this.endCompetition();
+          }
 
           // Calculate actual score from completed challenges
           const { totalScore, completedChallenges } = this.calculateUserScore(
@@ -808,7 +929,7 @@ class CTFSystem {
         });
 
       this.showNotification(
-        `🎉 Flag captured! +${challenge.points} points`,
+        `🎉 Flag captured! +${pointsToAward} points${stealMessage}`,
         "success"
       );
       this.closeModal();
@@ -850,6 +971,206 @@ class CTFSystem {
       completedChallenges
     );
     return { totalScore, completedChallenges };
+  }
+
+  // Generate new flag for stolen challenges
+  generateNewFlag(challenge) {
+    const baseFlags = {
+      1: [
+        "CTF{HTTP_H3AD3R_FL4G}",
+        "CTF{HTTP_ST0L3N_FL4G}",
+        "CTF{HTTP_N3W_FL4G}",
+        "CTF{HTTP_R3ST0L3N_FL4G}",
+        "CTF{HTTP_F1N4L_FL4G}",
+      ],
+      2: [
+        "CTF{DNS_3XF1LTR4T10N}",
+        "CTF{DNS_ST0L3N_FL4G}",
+        "CTF{DNS_N3W_FL4G}",
+        "CTF{DNS_R3ST0L3N_FL4G}",
+        "CTF{DNS_F1N4L_FL4G}",
+      ],
+      3: [
+        "CTF{FTP_CR3D3NT14LS}",
+        "CTF{FTP_ST0L3N_FL4G}",
+        "CTF{FTP_N3W_FL4G}",
+        "CTF{FTP_R3ST0L3N_FL4G}",
+        "CTF{FTP_F1N4L_FL4G}",
+      ],
+      4: [
+        "CTF{1CMP_C0V3RT_CH4NN3L}",
+        "CTF{1CMP_ST0L3N_FL4G}",
+        "CTF{1CMP_N3W_FL4G}",
+        "CTF{1CMP_R3ST0L3N_FL4G}",
+        "CTF{1CMP_F1N4L_FL4G}",
+      ],
+      5: [
+        "CTF{ARP_SP00F1NG_D3T3CT3D}",
+        "CTF{ARP_ST0L3N_FL4G}",
+        "CTF{ARP_N3W_FL4G}",
+        "CTF{ARP_R3ST0L3N_FL4G}",
+        "CTF{ARP_F1N4L_FL4G}",
+      ],
+      6: [
+        "CTF{TCP_STR34M_FL4G}",
+        "CTF{TCP_ST0L3N_FL4G}",
+        "CTF{TCP_N3W_FL4G}",
+        "CTF{TCP_R3ST0L3N_FL4G}",
+        "CTF{TCP_F1N4L_FL4G}",
+      ],
+      7: [
+        "CTF{EASY_CAESAR_ONE}",
+        "CTF{EASY_ST0L3N_ONE}",
+        "CTF{EASY_N3W_ONE}",
+        "CTF{EASY_R3ST0L3N_ONE}",
+        "CTF{EASY_F1N4L_ONE}",
+      ],
+      8: [
+        "CTF{EASY_CAESAR_TWO}",
+        "CTF{EASY_ST0L3N_TWO}",
+        "CTF{EASY_N3W_TWO}",
+        "CTF{EASY_R3ST0L3N_TWO}",
+        "CTF{EASY_F1N4L_TWO}",
+      ],
+      9: [
+        "CTF{EASY_CAESAR_THREE}",
+        "CTF{EASY_ST0L3N_THREE}",
+        "CTF{EASY_N3W_THREE}",
+        "CTF{EASY_R3ST0L3N_THREE}",
+        "CTF{EASY_F1N4L_THREE}",
+      ],
+      10: [
+        "CTF{EASY_PLAINTEXT}",
+        "CTF{EASY_ST0L3N_TEXT}",
+        "CTF{EASY_N3W_TEXT}",
+        "CTF{EASY_R3ST0L3N_TEXT}",
+        "CTF{EASY_F1N4L_TEXT}",
+      ],
+      11: [
+        "CTF{EASY_DNS_FLAG}",
+        "CTF{EASY_ST0L3N_DNS}",
+        "CTF{EASY_N3W_DNS}",
+        "CTF{EASY_R3ST0L3N_DNS}",
+        "CTF{EASY_F1N4L_DNS}",
+      ],
+    };
+
+    const flags = baseFlags[challenge.id] || [challenge.flag];
+
+    // Get current flag to avoid returning the same one
+    const currentFlag = challenge.flag;
+    let availableFlags = flags.filter((flag) => flag !== currentFlag);
+
+    // If no other flags available, generate a unique one
+    if (availableFlags.length === 0) {
+      const timestamp = Date.now().toString().slice(-4);
+      return `${currentFlag}_${timestamp}`;
+    }
+
+    const randomIndex = Math.floor(Math.random() * availableFlags.length);
+    return availableFlags[randomIndex];
+  }
+
+  // Start timer updates for occupied challenges
+  startTimerUpdates() {
+    // Clear any existing timer
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+    }
+
+    // Update timers every second
+    this.timerInterval = setInterval(() => {
+      const timers = document.querySelectorAll(".timer");
+      timers.forEach((timer) => {
+        const startTime = parseInt(timer.dataset.start);
+        const challengeId = parseInt(timer.dataset.challenge);
+        const currentTime = Date.now();
+        const timeElapsed = currentTime - startTime;
+        const timeoutDuration = 5 * 60 * 1000; // 5 minutes
+        const remainingTime = Math.max(0, timeoutDuration - timeElapsed);
+
+        const minutes = Math.floor(remainingTime / 60000);
+        const seconds = Math.floor((remainingTime % 60000) / 1000);
+
+        timer.textContent = `${minutes}:${seconds.toString().padStart(2, "0")}`;
+
+        // Add visual warning when time is running low (less than 1 minute)
+        if (remainingTime <= 60000 && remainingTime > 0) {
+          timer.style.color = "#ff6b6b";
+          timer.style.fontWeight = "bold";
+          timer.style.animation = "blink 1s infinite";
+        } else {
+          timer.style.color = "";
+          timer.style.fontWeight = "";
+          timer.style.animation = "";
+        }
+
+        // If time is up, make challenge available again
+        if (remainingTime <= 0) {
+          this.db.ref(`challenges/${challengeId}`).update({
+            status: "available",
+            occupiedBy: null,
+            startTime: null,
+          });
+          this.showNotification(
+            `Challenge ${challengeId} timed out and is now available!`,
+            "info"
+          );
+        }
+      });
+    }, 1000);
+  }
+
+  // Notify network generator to advance flag
+  notifyNetworkGenerator(challengeId) {
+    // Map challenge IDs to network generator challenge types
+    const challengeTypeMap = {
+      1: "http",
+      2: "dns",
+      3: "ftp",
+      4: "icmp",
+      5: "arp",
+      6: "tcp",
+      7: "caesar1",
+      8: "caesar2",
+      9: "caesar3",
+      10: "plaintext",
+      11: "easydns",
+    };
+
+    const challengeType = challengeTypeMap[challengeId];
+    if (challengeType) {
+      console.log(
+        `Notifying network generator to advance flag for ${challengeType}`
+      );
+      // For now, we'll use a simple approach - the network generator will
+      // automatically advance flags based on time or we can implement a more
+      // sophisticated communication system later
+    }
+  }
+
+  // End the competition when someone wins
+  endCompetition() {
+    // Clear timer interval
+    if (this.timerInterval) {
+      clearInterval(this.timerInterval);
+    }
+
+    // Disable all challenges
+    this.challenges.forEach((challenge) => {
+      this.db.ref(`challenges/${challenge.id}`).update({
+        status: "locked",
+        lockedReason: "Competition ended",
+      });
+    });
+
+    // Show winner announcement
+    setTimeout(() => {
+      this.showNotification(
+        "🎉 Competition ended! Check the leaderboard for final results.",
+        "info"
+      );
+    }, 2000);
   }
 
   // Recalculate all user scores from completed challenges
